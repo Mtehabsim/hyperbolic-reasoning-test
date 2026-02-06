@@ -1,0 +1,30 @@
+# Qwen2.5-7B-Instruct Configuration
+
+name: qwen_7b
+display_name: Qwen2.5-7B-Instruct
+type: non_reasoning  # Standard instruction-tuned model (control)
+
+# HuggingFace model identifier
+hf_model_id: Qwen/Qwen2.5-7B-Instruct
+
+# Architecture details
+architecture:
+  n_layers: 28
+  d_model: 3584
+  n_heads: 28
+  d_head: 128
+  d_mlp: 18944
+  vocab_size: 152064
+
+# Loading configuration
+loading:
+  torch_dtype: float16
+  trust_remote_code: true
+  device_map: auto
+
+# TransformerLens specific
+transformer_lens:
+  fold_ln: false
+  fold_value_biases: false
+  center_writing_weights: false
+  center_unembed: false

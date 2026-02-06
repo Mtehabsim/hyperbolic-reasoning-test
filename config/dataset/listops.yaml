@@ -1,0 +1,32 @@
+# ListOps Dataset Configuration
+# Based on Nangia & Bowman (2018), LRA Benchmark
+
+name: listops
+display_name: ListOps
+source: google-research/long-range-arena  # Official GitHub repo
+
+# Dataset splits
+n_train: 1500
+n_test: 500
+
+# Generation parameters
+generation:
+  depth_range: [1, 6]  # Nesting depth
+  sequence_length: [50, 500]  # Token length range
+  
+# Operators
+operators:
+  - MAX
+  - MIN
+  - SUM
+  - MED  # Median
+  
+# Values
+values:
+  range: [0, 9]  # Integer values
+
+# Output format
+format:
+  include_parse_tree: true
+  include_pairwise_distances: true
+  include_depth: true

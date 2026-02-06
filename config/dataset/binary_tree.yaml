@@ -1,0 +1,32 @@
+# Binary Tree Dataset Configuration
+# Synthetic hierarchical dataset with TRUE pairwise graph distances
+
+name: binary_tree
+display_name: BinaryTree
+
+# Dataset splits
+n_samples: 500  # Node pairs for training
+n_test: 250     # Node pairs for testing
+
+# Tree structure
+tree:
+  depth: 5        # Tree depth (root = 0), creates 31 nodes
+  # Full binary tree: 2^depth - 1 nodes
+  
+# Generation parameters
+generation:
+  seed: 42
+  balanced_sampling: true  # Even distribution across node depths
+
+# Output format
+format:
+  include_pairwise_distances: true  # CRITICAL: True graph distances
+  include_depth: true
+  include_tree_structure: true  # Include edge descriptions in prompt
+
+# Motivation
+# This dataset provides TRUE hierarchical structure in the distance matrix.
+# Unlike PrOntoQA where depth is 1D (1,3,5 hops), binary tree has:
+# - Full pairwise LCA-based distances
+# - Non-trivial embedding challenge for Euclidean geometry
+# - Natural fit for hyperbolic embeddings (trees embed with zero distortion)

@@ -1,0 +1,30 @@
+# GPT-2 Small Configuration (for verification)
+
+name: gpt2
+display_name: GPT-2 Small
+type: verification
+
+# HuggingFace model identifier
+hf_model_id: gpt2
+
+# Architecture details (for gpt2 small)
+architecture:
+  n_layers: 12
+  d_model: 768
+  n_heads: 12
+  d_head: 64
+  d_mlp: 3072
+  vocab_size: 50257
+
+# Loading configuration
+loading:
+  torch_dtype: float32
+  trust_remote_code: false
+  device_map: auto
+
+# TransformerLens specific
+transformer_lens:
+  fold_ln: true
+  fold_value_biases: true
+  center_writing_weights: true
+  center_unembed: true

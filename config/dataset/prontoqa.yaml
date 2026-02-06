@@ -1,0 +1,43 @@
+# PrOntoQA Dataset Configuration
+# Based on Saparov & He (NeurIPS 2022)
+
+name: prontoqa
+display_name: PrOntoQA
+source: asaparov/prontoqa  # Official GitHub repo
+
+# Dataset splits
+n_train: 1500  # TRUE samples only for training
+n_test_true: 300
+n_test_false: 300
+n_test: 600  # Total test: 300 TRUE + 300 FALSE
+
+# Generation parameters
+generation:
+  depth_range: [1, 5]  # Reasoning depth in hops
+  facts_per_sample: [3, 7]  # Number of facts
+  ontology: fictional  # fictional, true, false
+  ordering: random  # postorder, preorder, random
+
+# Entity configuration  
+entities:
+  - wumpus
+  - yumpus
+  - zumpus
+  - dumpus
+  - rompus
+  - impus
+  - tumpus
+  - vumpus
+  - jompus
+  - numpus
+
+# FALSE sample generation
+false_injection:
+  method: contradiction  # Inject contradiction in one fact
+  probability: 0.5  # For test set only
+
+# Output format
+format:
+  include_proof_graph: true
+  include_pairwise_distances: true
+  include_depth: true

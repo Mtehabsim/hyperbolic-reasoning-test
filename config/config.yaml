@@ -1,0 +1,244 @@
+# =============================================================================
+# HYPERBOLIC REASONING PROBES - MAIN CONFIGURATION
+# =============================================================================
+# All values should be referenced from config, not hardcoded.
+# This file serves as the single source of truth for all experiment parameters.
+#
+# After running ablation experiments (Phase 3a/3b/3c), update the optimal
+# settings here before running main experiments (Phase 4/5).
+# =============================================================================
+
+# Default component configs (loaded via Hydra)
+defaults:
+  - model: deepseek_7b      # Model config file from config/model/
+  - dataset: prontoqa       # Dataset config from config/dataset/
+  - _self_
+
+# =============================================================================
+# REPRODUCIBILITY
+# =============================================================================
+seed: 42                    # Random seed for all operations
+deterministic: true         # Use deterministic algorithms (may slow training)
+
+# =============================================================================
+# PROBE CONFIGURATION
+# =============================================================================
+# These are the core hyperparameters for probe training.
+# Embedding dimensions and curvature should be set after running ablations.
+probe:
+  # Probe type: determines the geometry for embedding distances
+  # Options:
+  #   - euclidean: Standard L2 distance in flat space
+  #   - hyperbolic: Poincaré ball model (better for hierarchies)
+  #   - lorentz: Lorentz/hyperboloid model (numerically more stable)
+  type: hyperbolic
+  
+  # Embedding dimension: lower is better for hyperbolic (shows advantage)
+  # Typical values: 2, 5, 8, 16, 32
+  # Set after running: scripts/run_dimension_ablation.py
+  embedding_dim: 5
+  
+  # Curvature: negative curvature for hyperbolic geometry
+  # Higher curvature = tighter embeddings
+  # Typical values: 0.5, 1.0, 2.0
+  # Set after running: scripts/run_dimension_ablation.py --sweep-curvature
+  curvature: 0.5
+  
+  # Training hyperparameters
+  learning_rate: 1.0e-3     # Initial learning rate (Adam optimizer)
+  weight_decay: 1.0e-4      # L2 regularization strength
+  epochs: 100               # Maximum training epochs
+  batch_size: 64            # Batch size (reduce if OOM)
+  early_stopping_patience: 10  # Stop if no improvement for N epochs
+
+# =============================================================================
+# LAYER CONFIGURATION
+# =============================================================================
+# Fixed layer indices for probing. DeepSeek-R1-7B has 28 layers (0-27).
+layer:
+  default: 23               # Primary layer: 82% depth (late-middle)
+  sweep: [8, 12, 16, 19, 21, 23, 25, 27]  # Layers to sweep in experiments
+  early: [8, 12]            # Early layers (feature extraction)
+  mid: [16, 19, 21]         # Middle layers (reasoning/abstraction)
+  late: [23, 25, 27]        # Late layers (task-specific)
+
+# =============================================================================
+# LAYER SELECTION (set after running scripts/run_layer_ablation.py)
+# =============================================================================
+# Controls which layers are used for probing.
+# Run ablation first to find optimal strategy.
+layer_selection:
+  # Selection method
+  # Options:
+  #   - fixed: Use hardcoded list from layer.sweep
+  #   - max_drift: Select top-k layers with highest L2 drift
+  #   - threshold: Select layers above Nth percentile drift
+  #   - single_best: Use only the single highest-drift layer
+  #   - single_best: Use only the single highest-drift layer
+  method: max_drift
+  
+  # For 'fixed' method: which layers to use
+  fixed_layers: [8, 12, 16, 19, 21, 23, 25, 27]
+  
+  # For 'max_drift' method: how many top layers to select
+  top_k: 3
+  
+  # For 'threshold' method: percentile cutoff (e.g., 90 = top 10%)
+  percentile: 90
+  
+  # Whether to aggregate (mean) selected layers before probing
+  # If false, trains separate probes per layer
+  aggregate: true
+
+# =============================================================================
+# HEAD SELECTION (set after running scripts/run_head_ablation.py)
+# =============================================================================
+# Controls how attention heads are aggregated for attention-weighted
+# token selection. Only applies when using 'attention_weighted' token method.
+head_selection:
+  # Head aggregation mode
+  # Options:
+  #   - mean: Average attention across all heads (smooth, may wash out signal)
+  #   - max: Use only the head with highest total attention (sparse)
+  #   - threshold: Use heads within X% of max attention (balanced)
+  mode: threshold
+  
+  # For 'threshold' mode: fraction of max attention to include
+  # E.g., 0.9 means keep heads with attention >= 90% of max head
+  threshold: 0.9
+  
+  # Number of top tokens to select per sample (for attention_weighted)
+  top_k_tokens: 5
+
+# =============================================================================
+# TOKEN SELECTION CONFIGURATION
+# =============================================================================
+# Controls which tokens are pooled to create sample representations.
+# Critical for H2 experiment (thinking tokens vs all-pool).
+token_selection:
+  # Primary selection method
+  # Options:
+  #   - thinking_tokens: Select tokens matching reasoning patterns below
+  #   - attention_weighted: Select high-attention tokens (uses head_selection)
+  #   - all_pool: Mean pool all tokens (baseline)
+  #   - last_token: Use only the last token
+  method: all_pool
+  
+  # Minimum tokens required before falling back to fallback method
+  min_tokens: 2
+  
+  # Fallback method if primary fails to find enough tokens
+  fallback: attention_weighted
+  
+  # Thinking tokens list
+  # Based on "Demystifying Reasoning Dynamics with Mutual Information" (arXiv:2506.02867)
+  # These tokens correspond to MI peaks - information bottleneck points during reasoning
+  thinking_tokens:
+    # Reflective/pause (high MI peaks per paper)
+    - "wait"
+    - "hmm"
+    - "hm"
+    - "Hmm"
+    - "Wait"
+    # Transition markers
+    - "okay"
+    - "ok"
+    - "well"
+    - "so"
+    - "therefore"
+    - "Thus"
+    - "Therefore"
+    - "thus"
+    - "hence"
+    - "now"
+    - "Hence"
+    # Self-correction (critical for reasoning)
+    - "actually"
+    - "Actually"
+    - "but"
+    - "But"
+    - "however"
+    - "although"
+    - "but wait"
+    - "wait,"
+    # Planning/structure
+    - "let me"
+    - "Let me"
+    - "first"
+    - "First"
+    - "next"
+    - "then"
+    - "finally"
+    - "step"
+    - "Step"
+    # Conclusion/inference
+    - "means"
+    - "implies"
+    - "shows"
+    - "proves"
+    - "conclude"
+    - "Conclude"
+    # Additional from paper (consider, note, important)
+    - "consider"
+    - "note"
+    - "Note"
+    - "importantly"
+    - "crucially"
+    - "specifically"
+    - "essentially"
+    - "alternatively"
+    - "interestingly"
+    - "Interestingly"
+    # Verification tokens
+    - "check"
+    - "verify"
+    - "confirm"
+    - "double-check"
+
+# =============================================================================
+# ABLATION SWEEP CONFIGURATIONS
+# =============================================================================
+# These are used by ablation scripts to sweep hyperparameters.
+
+# Dimension sweep for scripts/run_dimension_ablation.py
+dimension_sweep: [2, 5, 8, 16,20, 32]
+
+# Curvature sweep for scripts/run_dimension_ablation.py --sweep-curvature
+curvature_sweep: [0.5, 1.0, 2.0]
+
+# =============================================================================
+# OUTPUT PATHS (relative to project root)
+# =============================================================================
+paths:
+  data: outputs/data                 # Generated datasets
+  activations: outputs/activations   # Cached model activations
+  checkpoints: outputs/checkpoints   # Training checkpoints
+  results: outputs/results           # Experiment results (JSON)
+  figures: outputs/figures           # Generated plots
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+logging:
+  level: INFO                # Options: DEBUG, INFO, WARNING, ERROR
+  console: true              # Print to stdout
+  file: true                 # Save to log file
+  wandb:
+    enabled: false           # Enable Weights & Biases logging
+    project: hyperbolic-reasoning-probes
+    entity: null             # W&B username or team name
+
+# =============================================================================
+# NUMERICAL STABILITY
+# =============================================================================
+# Settings for numerical stability in hyperbolic computations.
+numerical:
+  # Maximum Distance Rescaling: clamps hyperbolic distances for float32 safety
+  # Higher = allows larger distances but risks overflow
+  mdr_max_norm: 15.0
+  
+  # Epsilon for numerical stability (avoid division by zero)
+  eps: 1.0e-8
+  
+  # Gradient clipping norm (prevents exploding gradients)
+  clip_grad_norm: 1.0
