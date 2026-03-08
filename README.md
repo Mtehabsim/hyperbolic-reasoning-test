@@ -122,9 +122,10 @@ If you find this work useful, please cite:
 ```bibtex
 @inproceedings{raj2026hyperbolic,
   title={Hyperbolic Geometry of Reasoning: Probing {LLM} Hidden States},
-  author={Raj, Arnav},
-  booktitle={ICLR 2026 Workshop on Geometry-grounded Representation Learning and Generative Modeling (GRaM)},
-  year={2026}
+  author={Arnav Raj},
+  booktitle={ICLR 2026 Workshop on Geometry-grounded Representation Learning and Generative Modeling},
+  year={2026},
+  url={https://openreview.net/forum?id=JmWG0P9MDf}
 }
 ```
 
