@@ -1,10 +1,15 @@
 # Hyperbolic Geometry of Reasoning: Probing LLM Hidden States
 
-Code for the paper "Hyperbolic Geometry of Reasoning: Probing LLM Hidden States" (anonymous submission).
+Code for the paper "Hyperbolic Geometry of Reasoning: Probing LLM Hidden States" (GRaM Workshop at ICLR 2026).
 
 ## Overview
 
 This codebase implements hyperbolic and Euclidean structural probes to investigate the geometric structure of hierarchical reasoning in LLM hidden states. We probe reasoning-specialized (DeepSeek-R1-Distill-Qwen-7B) and standard instruction-tuned (Qwen2.5-7B-Instruct) models on PrOntoQA logical reasoning tasks, comparing probe geometries across layers.
+
+**Key findings:**
+- Hyperbolic probes maintain robust performance across all layers ($\rho \approx 0.97$)
+- Euclidean probes exhibit late-layer degradation specific to reasoning-specialized models ($\rho = 0.49$ at L27)
+- Thinking tokens concentrate hierarchical information at the compressed final layer ($\rho = 0.87$ vs $0.39$ for uniform pooling)
 
 ## Requirements
 
@@ -109,3 +114,20 @@ All experiments use fixed seed 42. Hyperparameters: output dimension d=5, curvat
 ```bash
 python -m pytest tests/ -v
 ```
+
+## Citation
+
+If you find this work useful, please cite:
+
+```bibtex
+@inproceedings{raj2026hyperbolic,
+  title={Hyperbolic Geometry of Reasoning: Probing {LLM} Hidden States},
+  author={Raj, Arnav},
+  booktitle={ICLR 2026 Workshop on Geometry-grounded Representation Learning and Generative Modeling (GRaM)},
+  year={2026}
+}
+```
+
+## License
+
+This project is released under the [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) license.
