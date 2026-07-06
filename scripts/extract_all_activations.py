@@ -251,7 +251,7 @@ def main():
         "--dataset",
         type=str,
         default="prontoqa",
-        choices=["prontoqa", "listops", "binary_tree", "mock"],
+        choices=["prontoqa", "listops", "binary_tree", "ailuminate", "mock"],
         help="Dataset to use"
     )
     parser.add_argument(
@@ -303,6 +303,14 @@ def main():
         elif args.dataset == "binary_tree":
             gen = BinaryTreeGenerator(seed=args.seed, tree_depth=5)
             dataset = gen.generate_dataset(n_samples=args.n_samples)
+        elif args.dataset == "ailuminate":
+            from src.data.ailuminate import AILuminateGenerator
+            gen = AILuminateGenerator(seed=args.seed)
+            n_samples = args.n_samples if args.n_samples > 100 else 1000
+            n_leaves = len(gen.leaves)
+            ds = gen.generate(n_per_leaf=max(1, -(-n_samples // n_leaves)))
+            ds.samples = ds.samples[:n_samples]
+            dataset = ds
         else:
             gen = ListOpsGenerator(seed=args.seed)
             dataset = gen.generate(n_samples=args.n_samples)

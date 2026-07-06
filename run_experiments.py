@@ -48,11 +48,49 @@ def make_json_serializable(obj):
     return obj
 
 
-def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_activations_path: Path = None) -> dict:
+def _tree_distance_from_label_paths(label_paths):
+    """Shared-prefix tree distance between samples' taxonomy label-paths.
+
+    For paths p_i, p_j (root->leaf lists of node ids), distance =
+    (depth_i - shared) + (depth_j - shared), where shared = length of the common
+    prefix. Same-branch/sibling leaves are close; cross-branch leaves are far.
+    This is the BRANCHING-tree target for H1.5, replacing H1's 1-D
+    |depth_i - depth_j| ruler. Returns an (n, n) numpy matrix.
     """
-    Run H1: Hierarchy encoding experiment.
-    
+    import numpy as np
+    n = len(label_paths)
+    d = np.zeros((n, n), dtype=float)
+    for i in range(n):
+        pi = label_paths[i]
+        for j in range(n):
+            pj = label_paths[j]
+            shared = 0
+            for a, b in zip(pi, pj):
+                if a == b:
+                    shared += 1
+                else:
+                    break
+            d[i, j] = (len(pi) - shared) + (len(pj) - shared)
+    return d
+
+
+def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_activations_path: Path = None,
+                      target_mode: str = "depth", out_prefix: str = "h1") -> dict:
+    """
+    Run H1 / H1.5: Hierarchy encoding experiment.
+
     Compares Euclidean vs Hyperbolic probes for distance preservation.
+
+    ``target_mode`` selects what the probe regresses onto -- the ONLY difference
+    between H1 and H1.5 (everything else -- extraction, probes, metrics, stats,
+    plots -- is shared):
+      - "depth"    : H1. Target = |depth_i - depth_j| (a 1-D reasoning-depth ruler;
+                     Raj's setup). A line fits Euclidean and hyperbolic equally.
+      - "taxonomy" : H1.5. Target = shared-prefix TREE distance from each sample's
+                     metadata["label_path"] (a branching harm taxonomy). This is
+                     where hyperbolic geometry can genuinely win, if the hierarchy
+                     is encoded. Falls back to depth if no label_path is present.
+    ``out_prefix`` names the output files (h1_* vs h15_*).
     """
     logger = get_logger()
     logger.info(f"=== H1 Experiment: {model_name} ===")
@@ -112,7 +150,10 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
     import numpy as np  # Import early for binary tree processing
     if dataset_name == "binarytree" and str(test_path).endswith("binarytree_depth5.json"):
         # Load raw JSON for binary tree pairwise distance format
-        import json
+        # NOTE: do NOT `import json` here -- a local import makes `json` a
+        # function-local name for the WHOLE function, so on the non-binarytree
+        # path (prontoqa/ailuminate) the later json.dump at save time raised
+        # UnboundLocalError. The module-level `import json` (top of file) covers us.
         with open(test_path, "r") as f:
             raw_binarytree_data = json.load(f)
         logger.info(f"Loaded {len(raw_binarytree_data)} samples from binary tree data")
@@ -154,9 +195,36 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
             np.abs(distances.reshape(-1, 1) - distances.reshape(1, -1)),
             dtype=torch.float32
         )
+    elif target_mode == "taxonomy":
+        # H1.5: BRANCHING taxonomy tree distance from each sample's label_path.
+        label_paths = [list(s.metadata.get("label_path", [s.depth])) for s in test_dataset]
+        have_paths = any(len(p) > 1 for p in label_paths)
+        if not have_paths:
+            logger.warning("target_mode='taxonomy' but no metadata['label_path'] found "
+                           "(len>1); falling back to depth ruler. Use a taxonomy dataset "
+                           "(e.g. ailuminate) for H1.5.")
+            depths = np.array([s.depth for s in test_dataset])
+            target_distances = torch.tensor(
+                np.abs(depths.reshape(-1, 1) - depths.reshape(1, -1)),
+                dtype=torch.float32,
+            )
+        else:
+            logger.info(f"H1.5 taxonomy target: {len(set(tuple(p) for p in label_paths))} "
+                        f"distinct label-paths (branching tree distance)")
+            target_distances = torch.tensor(
+                _tree_distance_from_label_paths(label_paths),
+                dtype=torch.float32,
+            )
     else:
-        # PrOntoQA/ListOps: use depth as proxy
+        # H1: PrOntoQA/ListOps use depth as a 1-D proxy.
         depths = np.array([s.depth for s in test_dataset])
+        if len(np.unique(depths)) < 2:
+            logger.warning(
+                f"H1 depth target is DEGENERATE: all {len(depths)} samples have "
+                f"depth={depths[0]}, so |depth_i-depth_j|=0 everywhere and the probe "
+                f"fits noise. Dataset '{dataset_name}' has no depth variation "
+                f"(flat taxonomy?) -- use --experiment h1.5 (taxonomy tree target) instead."
+            )
         # Target: Cross-sample depth differences as hierarchy proxy
         target_distances = torch.tensor(
             np.abs(depths.reshape(-1, 1) - depths.reshape(1, -1)),
@@ -198,21 +266,29 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
         target_distances = target_distances[:n_samples, :n_samples]
     
     # Run hierarchy experiment
+    # Device: honor config, but fall back to CPU when CUDA is unavailable so the
+    # pipeline runs on a laptop (probe training is small). DGX keeps cuda.
+    device = config.get("device", "cuda")
+    if device == "cuda" and not torch.cuda.is_available():
+        logger.warning("CUDA not available -> running probes on CPU")
+        device = "cpu"
+
     experiment = HierarchyExperiment(
         input_dim=input_dim,
         layers=layers,
         config=ProbeTrainingConfig(**probe_config),
         seed=config.get("seed", 42),
+        device=device,
     )
     
     results = experiment.run_all_layers(activations_per_layer, target_distances)
     
-    # Save results
-    experiment.save_results(output_dir / "h1_results.json")
-    
+    # Save results (out_prefix = "h1" for depth / "h15" for taxonomy)
+    experiment.save_results(output_dir / f"{out_prefix}_results.json")
+
     # Generate plots
     result_dicts = [r.to_dict() for r in results]
-    fig = plot_euclidean_vs_hyperbolic(result_dicts, output_dir / "h1_comparison.png")
+    fig = plot_euclidean_vs_hyperbolic(result_dicts, output_dir / f"{out_prefix}_comparison.png")
     
     # Extract scores for comprehensive statistical analysis
     euclidean_scores = [r["spearman_rho"] for r in result_dicts if r["probe_type"] == "euclidean"]
@@ -241,7 +317,7 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
     full_stats["bonferroni_corrected_p"] = corrected_p
     
     # Log summary
-    logger.info(f"H1 Results Summary:")
+    logger.info(f"{out_prefix.upper()} Results Summary (target_mode={target_mode}):")
     logger.info(f"  Euclidean avg ρ: {full_stats['descriptive']['euclidean_mean']:.4f} (95% CI: {full_stats['descriptive']['euclidean_ci_95']})")
     logger.info(f"  Hyperbolic avg ρ: {full_stats['descriptive']['hyperbolic_mean']:.4f} (95% CI: {full_stats['descriptive']['hyperbolic_ci_95']})")
     logger.info(f"  Improvement: {full_stats['descriptive']['percent_improvement']:.1f}% (95% CI for diff: {full_stats['descriptive']['diff_ci_95']})")
@@ -252,7 +328,7 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
     
     # Save extended results with statistics
     extended_results = {
-        "h1": result_dicts,
+        out_prefix: result_dicts,
         "statistics": full_stats,
         "lorentz_scores": lorentz_scores,
         "metadata": {
@@ -260,15 +336,27 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
             "timestamp": datetime.now().isoformat(),
             "layers": layers,
             "n_samples": target_distances.shape[0],
+            "target_mode": target_mode,
+            "dataset": dataset_name,
         }
     }
-    
-    with open(output_dir / "h1_full_results.json", "w") as f:
+
+    with open(output_dir / f"{out_prefix}_full_results.json", "w") as f:
         # Convert all non-serializable types recursively (fixes circular reference)
         serializable_results = make_json_serializable(extended_results)
         json.dump(serializable_results, f, indent=2)
-    
+
     return extended_results
+
+
+def run_h15_experiment(model_name: str, config: dict, output_dir: Path, cached_activations_path: Path = None) -> dict:
+    """H1.5: same as H1 but regress onto the BRANCHING taxonomy tree distance
+    (from metadata['label_path']) instead of the 1-D depth ruler. Thin wrapper --
+    all logic is shared with run_h1_experiment via target_mode."""
+    return run_h1_experiment(
+        model_name, config, output_dir, cached_activations_path,
+        target_mode="taxonomy", out_prefix="h15",
+    )
 
 
 def run_h2_experiment(model_name: str, config: dict, output_dir: Path, generate_cot: bool = True) -> dict:
@@ -420,9 +508,9 @@ def main():
     parser.add_argument(
         "--experiment",
         type=str,
-        choices=["h1", "h2", "all"],
+        choices=["h1", "h1.5", "h2", "all"],
         default="all",
-        help="Which experiment to run",
+        help="Which experiment to run (h1.5 = taxonomy tree target)",
     )
     parser.add_argument(
         "--model",
@@ -450,7 +538,7 @@ def main():
                        choices=["euclidean", "hyperbolic", "lorentz"],
                        help="Probe types to run (overrides config)")
     parser.add_argument("--dataset", type=str, default=None,
-                       choices=["prontoqa", "binarytree", "listops"],
+                       choices=["prontoqa", "binarytree", "listops", "ailuminate"],
                        help="Dataset to use (overrides config)")
     parser.add_argument("--h2-n-samples", type=int, default=None,
                        help="Number of samples for H2 experiment (overrides config)")
@@ -520,7 +608,10 @@ def main():
         
         if args.experiment in ["h1", "all"]:
             model_results.update(run_h1_experiment(model_name, config, model_dir, args.cached_activations))
-        
+
+        if args.experiment in ["h1.5", "all"]:
+            model_results.update(run_h15_experiment(model_name, config, model_dir, args.cached_activations))
+
         if args.experiment in ["h2", "all"]:
             model_results.update(run_h2_experiment(model_name, config, model_dir))
         

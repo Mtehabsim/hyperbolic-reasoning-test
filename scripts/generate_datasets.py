@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.prontoqa import generate_prontoqa_datasets
 from src.data.listops import generate_listops_datasets
+from src.data.ailuminate import generate_ailuminate_datasets
 from src.utils.logging import setup_logging, get_logger
 
 
@@ -26,7 +27,7 @@ def main():
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["prontoqa", "listops", "all"],
+        choices=["prontoqa", "listops", "ailuminate", "all"],
         default="prontoqa",
         help="Which dataset to generate",
     )
@@ -82,7 +83,20 @@ def main():
         logger.info(f"ListOps test: {len(test)} samples")
         logger.info(f"Train stats: {train.get_statistics()}")
         logger.info(f"Test stats: {test.get_statistics()}")
-    
+
+    if args.dataset in ["ailuminate", "all"]:
+        logger.info("Generating AILuminate (harm-taxonomy) dataset...")
+        train, test = generate_ailuminate_datasets(
+            output_dir=output_dir,
+            n_train=args.n_train,
+            n_test=args.n_test,
+            seed=args.seed,
+        )
+        logger.info(f"AILuminate train: {len(train)} samples")
+        logger.info(f"AILuminate test: {len(test)} samples")
+        logger.info(f"Train stats: {train.get_statistics()}")
+        logger.info(f"Test stats: {test.get_statistics()}")
+
     logger.info(f"Datasets saved to: {output_dir}")
 
 
