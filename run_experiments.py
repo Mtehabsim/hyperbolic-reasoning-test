@@ -137,6 +137,19 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
         if not train_path.exists():
             logger.info("Generating ListOps dataset...")
             generate_listops_datasets(data_dir, n_train=500, n_test=500)
+    elif dataset_name == "ailuminate":
+        # AILuminate harm taxonomy (H1.5 target lives here). CRITICAL: without this
+        # branch the code fell through to the prontoqa `else`, loading PrOntoQA
+        # labels while the cached .pt held AILuminate activations -> every
+        # activation paired with the WRONG sample -> rho~0 by construction (this
+        # was the real cause of the rho~0 "result", NOT the placeholder prompts).
+        from src.data import generate_ailuminate_datasets
+        train_path = data_dir / "ailuminate_train.json"
+        test_path = data_dir / "ailuminate_test.json"
+        if not test_path.exists():
+            logger.info("Generating AILuminate dataset...")
+            # 1000 test to match the cached activations extracted with n_test=1000.
+            generate_ailuminate_datasets(data_dir, n_test=1000, n_train=1000, seed=config.get("seed", 42))
     else:  # default: prontoqa
         train_path = data_dir / "prontoqa_train.json"
         test_path = data_dir / "prontoqa_test.json"
@@ -182,11 +195,35 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
         batch_size=config.get("batch_size", 1),
         cached_activations_path=cached_activations_path,
     )
-    
+
     # Get target distances from dataset
     import torch
     import numpy as np
-    
+
+    # ALIGNMENT GUARD: the taxonomy/depth target is built from `test_dataset`, but
+    # the cached activations were extracted from whatever dataset order extraction
+    # used. If the dataset json was regenerated with a different shuffle (or the
+    # wrong dataset was loaded entirely), activations pair with the WRONG labels
+    # -> rho~0. The cached .pt metadata carries the exact `sample_ids` in
+    # activation-row order; reorder test_dataset to match it so pairing is correct
+    # regardless of shuffle/regeneration. (No-op for binarytree raw path.)
+    if raw_binarytree_data is None and cached_activations_path is not None:
+        cached_meta = (activation_result or {}).get("metadata", {}) or {}
+        cached_ids = cached_meta.get("sample_ids")
+        ds_ids = [s.id for s in test_dataset]
+        if cached_ids and set(cached_ids) == set(ds_ids) and list(cached_ids) != list(ds_ids):
+            logger.warning("Reordering test_dataset to match cached-activation sample order "
+                           "(shuffle/regeneration mismatch detected).")
+            by_id = {s.id: s for s in test_dataset.samples}
+            test_dataset.samples = [by_id[i] for i in cached_ids]
+        elif cached_ids and set(cached_ids) != set(ds_ids):
+            logger.error("MISALIGNMENT: cached-activation sample_ids do NOT match the loaded "
+                         f"dataset '{dataset_name}' ({len(set(cached_ids) & set(ds_ids))}/"
+                         f"{len(ds_ids)} overlap). Activations and labels are from different "
+                         "datasets -> results will be meaningless. Re-extract with the SAME "
+                         "dataset, or point --data-dir at the extracted dataset json.")
+        prompts = [s.prompt for s in test_dataset]
+
     if raw_binarytree_data is not None:
         # Binary tree: use actual distances as 1D target (not pairwise matrix)
         # Since each sample IS a node pair, we use distances directly

@@ -86,7 +86,10 @@ def main():
         "attention": {},
         "metadata": {"synthetic_control": True, "planted_taxonomy": True,
                      "branch_strength": args.branch_strength,
-                     "leaf_strength": args.leaf_strength, "noise": args.noise},
+                     "leaf_strength": args.leaf_strength, "noise": args.noise,
+                     # sample_ids in activation-row order so the experiment's
+                     # alignment guard can pair labels correctly.
+                     "sample_ids": [s.id for s in samples]},
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     torch.save(cached, args.out)
