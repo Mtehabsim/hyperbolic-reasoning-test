@@ -47,9 +47,15 @@ probe:
   # Training hyperparameters
   learning_rate: 1.0e-3     # Initial learning rate (Adam optimizer)
   weight_decay: 1.0e-4      # L2 regularization strength
-  epochs: 100               # Maximum training epochs
+  # NOTE: 100 epochs converged the easy 5-level depth ruler (H1/PrOntoQA) but
+  # STARVED the harder branching-taxonomy target (H1.5): the distortion loss
+  # plateaus early while Spearman rho (the reported metric) keeps climbing for
+  # ~1000+ epochs, so the probe was scored near-random on a signal it could fully
+  # recover with more training (verified on a planted-taxonomy control: rho 0.04
+  # @100ep -> 0.85 @2000ep). Raised so the structural probe actually converges.
+  epochs: 2000              # Maximum training epochs
   batch_size: 64            # Batch size (reduce if OOM)
-  early_stopping_patience: 10  # Stop if no improvement for N epochs
+  early_stopping_patience: 50  # Stop if no RELATIVE improvement for N epochs
 
 # =============================================================================
 # LAYER CONFIGURATION

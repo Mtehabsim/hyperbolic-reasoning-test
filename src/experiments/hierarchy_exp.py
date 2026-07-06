@@ -25,13 +25,18 @@ from src.utils.reproducibility import set_seed
 class ProbeTrainingConfig:
     """Configuration for probe training."""
     learning_rate: float = 1e-3
-    epochs: int = 100
+    # 100 epochs was enough for the easy 5-level depth ruler but starves the
+    # harder branching-taxonomy target (rho keeps climbing for ~1000+ epochs).
+    # Raised so the structural probe actually converges on the rank ordering it
+    # is scored on. Combined with the relative early-stop threshold in
+    # train_probe, easy targets still stop early; hard ones get the budget.
+    epochs: int = 2000
     batch_size: int = 32
     output_dim: int = 16
     curvature: float = 1.0
     mdr_max_norm: float = 15.0
     weight_decay: float = 1e-4
-    early_stopping_patience: int = 10
+    early_stopping_patience: int = 50
 
 
 @dataclass 
@@ -143,16 +148,25 @@ class HierarchyExperiment:
             
             epochs_trained = epoch + 1
             current_loss = loss.item()
-            
-            # Early stopping
-            if current_loss < best_loss - 1e-6:
+
+            # Early stopping. IMPORTANT: use a RELATIVE improvement threshold, not
+            # an absolute 1e-6. With the branching-taxonomy target the distortion
+            # LOSS plateaus early (distances roughly right in magnitude) while the
+            # rank order (Spearman rho -- the metric we actually report) keeps
+            # improving for hundreds more epochs. An absolute 1e-6 threshold fired
+            # early-stop while rho was still near-random, starving the harder
+            # taxonomy target of training (the easy 5-level depth ruler converged
+            # before this bit, which is why H1 looked fine and H1.5 did not).
+            # A relative threshold keeps training while the loss is still dropping
+            # by a meaningful fraction.
+            if current_loss < best_loss * (1.0 - 1e-3):
                 best_loss = current_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
-            
+
             if patience_counter >= self.config.early_stopping_patience:
-                self.logger.debug(f"Early stopping at epoch {epoch+1}")
+                self.logger.debug(f"Early stopping at epoch {epoch+1} (loss={current_loss:.5f})")
                 break
         
         return probe, best_loss, epochs_trained
