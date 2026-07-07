@@ -140,17 +140,22 @@ def generate_ailuminate_datasets(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    gen = AILuminateGenerator(seed=seed)
-    n_leaves = len(gen.leaves)
-
-    def _sized(n_total: int) -> Dataset:
+    def _sized(n_total: int, gen_seed: int) -> Dataset:
+        # IMPORTANT: each split gets its OWN generator/seed so the TEST set is
+        # deterministic REGARDLESS of n_train. Previously train and test shared one
+        # rng, so changing n_train changed the rng state before test -> a different
+        # trimmed test subset/order -> extraction and the experiment (which may
+        # regenerate with a different n_train) got mismatched test sets (the
+        # 992/1000 misalignment behind the rho~0). Independent seeds fix that.
+        gen = AILuminateGenerator(seed=gen_seed)
+        n_leaves = len(gen.leaves)
         per_leaf = max(1, -(-n_total // n_leaves))   # ceil division
         ds = gen.generate(n_per_leaf=per_leaf)
         ds.samples = ds.samples[:n_total]            # trim to requested total
         return ds
 
-    train = _sized(n_train)
-    test = _sized(n_test)
+    train = _sized(n_train, seed)
+    test = _sized(n_test, seed + 1)   # test seed independent of train / n_train
 
     train.save(output_dir / "ailuminate_train.json")
     test.save(output_dir / "ailuminate_test.json")

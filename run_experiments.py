@@ -209,19 +209,35 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
     # regardless of shuffle/regeneration. (No-op for binarytree raw path.)
     if raw_binarytree_data is None and cached_activations_path is not None:
         cached_meta = (activation_result or {}).get("metadata", {}) or {}
-        cached_ids = cached_meta.get("sample_ids")
+        cached_ids = list(cached_meta.get("sample_ids") or [])
         ds_ids = [s.id for s in test_dataset]
-        if cached_ids and set(cached_ids) == set(ds_ids) and list(cached_ids) != list(ds_ids):
-            logger.warning("Reordering test_dataset to match cached-activation sample order "
-                           "(shuffle/regeneration mismatch detected).")
+        if cached_ids:
             by_id = {s.id: s for s in test_dataset.samples}
-            test_dataset.samples = [by_id[i] for i in cached_ids]
-        elif cached_ids and set(cached_ids) != set(ds_ids):
-            logger.error("MISALIGNMENT: cached-activation sample_ids do NOT match the loaded "
-                         f"dataset '{dataset_name}' ({len(set(cached_ids) & set(ds_ids))}/"
-                         f"{len(ds_ids)} overlap). Activations and labels are from different "
-                         "datasets -> results will be meaningless. Re-extract with the SAME "
-                         "dataset, or point --data-dir at the extracted dataset json.")
+            overlap = [i for i in cached_ids if i in by_id]
+            n_ov, n_cached = len(overlap), len(cached_ids)
+            if n_ov == n_cached and cached_ids == ds_ids:
+                pass  # already perfectly aligned
+            elif n_ov == n_cached:
+                logger.warning("Reordering test_dataset to cached-activation sample order "
+                               "(same set, different order).")
+                test_dataset.samples = [by_id[i] for i in cached_ids]
+            elif n_ov >= max(4, int(0.5 * n_cached)):
+                # Partial overlap (e.g. different n_train -> different trimmed subset).
+                # Keep ONLY the samples present in the cache, in cache/activation-row
+                # order, and slice the activation rows to the SAME positions. This
+                # guarantees correct activation<->label pairing even on a subset
+                # mismatch, instead of silently mispairing (the rho~0 failure).
+                logger.warning(f"Partial id overlap {n_ov}/{n_cached}: aligning on the "
+                               f"intersection ({n_ov} samples) by cache order; dropping the rest.")
+                keep_pos = [k for k, i in enumerate(cached_ids) if i in by_id]
+                test_dataset.samples = [by_id[cached_ids[k]] for k in keep_pos]
+                for layer in list(activation_result["activations"].keys()):
+                    activation_result["activations"][layer] = \
+                        activation_result["activations"][layer][keep_pos]
+            else:
+                logger.error(f"MISALIGNMENT: cached sample_ids barely overlap the loaded "
+                             f"dataset '{dataset_name}' ({n_ov}/{n_cached}) -> different "
+                             "datasets. Re-extract with the SAME dataset / --data-dir.")
         prompts = [s.prompt for s in test_dataset]
 
     if raw_binarytree_data is not None:
@@ -237,13 +253,18 @@ def run_h1_experiment(model_name: str, config: dict, output_dir: Path, cached_ac
         label_paths = [list(s.metadata.get("label_path", [s.depth])) for s in test_dataset]
         have_paths = any(len(p) > 1 for p in label_paths)
         if not have_paths:
-            logger.warning("target_mode='taxonomy' but no metadata['label_path'] found "
-                           "(len>1); falling back to depth ruler. Use a taxonomy dataset "
-                           "(e.g. ailuminate) for H1.5.")
-            depths = np.array([s.depth for s in test_dataset])
-            target_distances = torch.tensor(
-                np.abs(depths.reshape(-1, 1) - depths.reshape(1, -1)),
-                dtype=torch.float32,
+            # HARD FAIL, do NOT silently fall back to a depth ruler. Silently
+            # falling back is EXACTLY the bug that produced the rho~0 result: with
+            # no ailuminate dispatch branch, PrOntoQA was loaded (no label_path),
+            # this fell back to the PrOntoQA depth ruler, and that ruler was
+            # regressed against AILuminate activations -> rho~0. A taxonomy
+            # experiment must never quietly become a depth experiment on the wrong
+            # dataset. Fail loudly so the misroute is caught immediately.
+            raise ValueError(
+                f"target_mode='taxonomy' but the loaded dataset '{dataset_name}' has no "
+                f"metadata['label_path'] (len>1) on any sample -- the WRONG dataset was "
+                f"loaded (first ids: {[s.id for s in test_dataset.samples[:3]]}). H1.5 needs "
+                f"a taxonomy dataset (e.g. ailuminate). Check the dataset dispatch / --data-dir."
             )
         else:
             logger.info(f"H1.5 taxonomy target: {len(set(tuple(p) for p in label_paths))} "
